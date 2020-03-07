@@ -154,4 +154,46 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s,
   return {x,y};
 }
 
+// Check if there is a risk of collision with the vehicle in front
+bool frontal_collision_risk(vector<double> other_vehicle, double current_ref_s, int lane_no, int prev_path_size) {
+  double other_veh_d = other_vehicle[6];
+  if((other_veh_d > lane_no*4) && (other_veh_d < (lane_no+1)*4)) {
+      //std::cout<<"Vehicle in lane detected with id: "<<other_vehicle[0]<<"\n";
+      double other_veh_s = other_vehicle[5];
+      double other_veh_vx = other_vehicle[3];
+      double other_veh_vy = other_vehicle[4];
+      double other_veh_res_vel = sqrt(other_veh_vx*other_veh_vx + other_veh_vy*other_veh_vy);
+
+      double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
+      if (fut_other_veh_s > current_ref_s) {
+          //std::cout<<"Vehicle in front detected with id: "<<other_vehicle[0]<<"\n";
+          if (fut_other_veh_s - current_ref_s < 30) {
+              std::cout<<"Vehicle within 30m detected in front with id: "<<other_vehicle[0]<<"\n";
+	      return true;
+          }
+      }
+  }
+  return false;
+}
+
+bool is_lane_free(vector<vector<double>> sensor_fusion, double current_ref_s, int to_lane, int prev_path_size) {
+  for(int i=0; i<sensor_fusion.size(); i++) {
+      double other_veh_d = sensor_fusion[i][6];
+      if((other_veh_d > to_lane*4) && (other_veh_d < (to_lane+1)*4)) {
+          std::cout<<"Vehicle in to lane "<<to_lane<<" detected with id: "<<sensor_fusion[i][0]<<"\n";
+          double other_veh_s = sensor_fusion[i][5];
+          double other_veh_vx = sensor_fusion[i][3];
+          double other_veh_vy = sensor_fusion[i][4];
+          double other_veh_res_vel = sqrt(other_veh_vx*other_veh_vx + other_veh_vy*other_veh_vy);
+
+	  double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
+          if (fabs(fut_other_veh_s - current_ref_s) < 60) {
+                std::cout<<"Vehicle within 60m detected with id: "<<sensor_fusion[i][0]<<"\n";
+	        return false;
+          }
+      }
+  }
+  return true;
+}
+
 #endif  // HELPERS_H

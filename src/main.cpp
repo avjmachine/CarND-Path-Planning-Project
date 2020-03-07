@@ -108,11 +108,14 @@ int main() {
           vector<double> next_y_vals;
 
 	  bool apply_brakes = false; //in initial default case, brakes are not applied
+          bool change_lane = false; //in initial case
+          int to_lane;
 
 	  std::cout<<"s = "<<car_s<<"\n";
 	  std::cout<<"previous s = "<<end_path_s<<"\n";
 	  std::cout<<"x = "<<car_x<<"\n";
 	  std::cout<<"yaw = "<<car_yaw<<"\n";
+	  std::cout<<"lane_no= "<<lane_no<<"\n";
           std::cout<<"No. of points from previous path: "<<prev_path_size<<"\n";
 	
 	  double current_ref_s = car_s; 
@@ -182,39 +185,43 @@ int main() {
 	  }
 
 	  // for(int i=0; i<anchor_pts_x.size(); i++) {
-	  //    std::cout<<"Anchor points in vehiclecoords: \n";
+	  //    std::cout<<"Anchor points in vehicle coords: \n";
 	  //    std::cout<<anchor_pts_x[i]<<" ";
 	  //    std::cout<<anchor_pts_y[i]<<"\n";
           //}
 
 	  // check for sensor fusion data to avoid collisions with other vehicles
 	  for(int i=0; i<sensor_fusion.size(); i++) {
-	      double other_veh_d = sensor_fusion[i][6];
-              if((other_veh_d > lane_no*4) && (other_veh_d < (lane_no+1)*4)) {
-		  std::cout<<"Vehicle in lane detected with id: "<<sensor_fusion[i][0]<<"\n";
-	          double other_veh_s = sensor_fusion[i][5];
-		  double other_veh_vx = sensor_fusion[i][3];
-		  double other_veh_vy = sensor_fusion[i][4];
-		  double other_veh_res_vel = sqrt(other_veh_vx*other_veh_vx + other_veh_vy*other_veh_vy);
+	      if (frontal_collision_risk(sensor_fusion[i], current_ref_s, lane_no, prev_path_size)) { 
+	          change_lane = true;
+		  break;
+	      }
+          }		  
 
-		  double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
-		  if (fut_other_veh_s > current_ref_s) {
-		      std::cout<<"Vehicle in front detected with id: "<<sensor_fusion[i][0]<<"\n";	  
-		      if (fut_other_veh_s - current_ref_s < 50) {
-			  std::cout<<"Vehicle within 50m detected in front with id: "<<sensor_fusion[i][0]<<"\n";    
-		          apply_brakes = true;
-		      }
-		  }	  
-	      }	      
+	  if (change_lane) {
+	      if (lane_no==1 || lane_no==2) {
+	            to_lane = lane_no - 1;
+	       }
+	      else if (lane_no==0) {
+	            to_lane = lane_no + 1;
+	       }
+	      if (is_lane_free(sensor_fusion, current_ref_s, to_lane, prev_path_size)) {
+                    lane_no = to_lane;
+		    std::cout<<"Lane changed to :"<<lane_no<<"\n";
+	       }
+	      else {
+                    change_lane = false;
+	            apply_brakes = true;
+               }
 	  } 
 
 	  if (apply_brakes) {
-	      current_speed -= 0.1;
-	      std::cout<<"Current speed set to: "<<current_speed<<"\n";
+	      current_speed -= 0.2;
+	      std::cout<<"Braking! Current speed set to: "<<current_speed<<"\n";
 	  }
 	  else if (current_speed < REF_SPEED) { 
-	      current_speed += 0.1;
-	      std::cout<<"Current speed set to: "<<current_speed<<"\n";
+	      current_speed += 0.2;
+	      std::cout<<"Speeding Up! Current speed set to: "<<current_speed<<"\n";
 	  }
 	  
 	  // get new path points from a spline
