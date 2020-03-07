@@ -105,15 +105,17 @@ int main() {
 	  vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
-
 	  std::cout<<"s = "<<car_s<<"\n";
+	  std::cout<<"previous s = "<<end_path_s<<"\n";
 	  std::cout<<"x = "<<car_x<<"\n";
 	  std::cout<<"yaw = "<<car_yaw<<"\n";
           std::cout<<"No. of points from previous path: "<<prev_path_size<<"\n";
+	
+	  double current_ref_s = car_s; 
+	  if (prev_path_size > 0) {
+              current_ref_s = end_path_s; 
+	  }
+
 	  if (prev_path_size < 2) {
 	      double prev_car_x = car_x - ref_speed*0.02*cos(deg2rad(car_yaw));
 	      double prev_car_y = car_y - ref_speed*0.02*sin(deg2rad(car_yaw));
@@ -150,9 +152,9 @@ int main() {
 
 	  //add remaining points from the future path using an interpolated spline
 	  //create 3 additional anchor points for the spline by calculating far spaced future positions
-	  vector<double> next_anchor_pt_1 = getXY(car_s + 25.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-	  vector<double> next_anchor_pt_2 = getXY(car_s + 50.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-	  vector<double> next_anchor_pt_3 = getXY(car_s + 75.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+	  vector<double> next_anchor_pt_1 = getXY(current_ref_s + 25.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+	  vector<double> next_anchor_pt_2 = getXY(current_ref_s + 50.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+	  vector<double> next_anchor_pt_3 = getXY(current_ref_s + 75.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
 	  anchor_pts_x.push_back(next_anchor_pt_1[0]);
 	  anchor_pts_x.push_back(next_anchor_pt_2[0]);
@@ -180,6 +182,24 @@ int main() {
 	      std::cout<<anchor_pts_x[i]<<" ";
 	      std::cout<<anchor_pts_y[i]<<"\n";
           }
+
+	  // check for sensor fusion data to avoid collisions with other vehicles
+	  for(int i=0; i<sensor_fusion.size(); i++) {
+	      double other_veh_d = sensor_fusion[i][6];
+              if((other_veh_d > lane_no*4) && (other_veh_d < (lane_no+1)*4)) {
+	          double other_veh_s = sensor_fusion[i][5];
+		  double other_veh_vx = sensor_fusion[i][3];
+		  double other_veh_vy = sensor_fusion[i][4];
+		  double other_veh_res_vel = sqrt(other_veh_vx*other_veh_vx + other_veh_vy*other_veh_vy);
+
+		  double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
+		  if (fut_other_veh_s > current_ref_s) {
+		      if (fut_other_veh_s - current_ref_s < 25) {
+		          ref_speed = 0.9*other_veh_res_vel;
+		      }
+		  }	  
+	      }	      
+	  } 
 
           // the following spline data is in vehicle coordinates
 	  tk::spline spline_trajectory;
