@@ -7,6 +7,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
 
 // for convenience
 using nlohmann::json;
@@ -90,7 +91,18 @@ int main() {
 
           json msgJson;
 
-          vector<double> next_x_vals;
+	  double ref_speed = 49.0*0.44704;  //kept 1mph below 50mph for safety and is converted to m/s
+	  int lane_no = 1; //initially in the centre lane
+	  int prev_path_size = previous_path_x.size();
+          
+	  double current_ref_x = car_x;
+	  double current_ref_y = car_y;
+	  double current_ref_yaw_rad = deg2rad(car_yaw);
+
+	  vector<double> anchor_pts_x;
+	  vector<double> anchor_pts_y;
+          
+	  vector<double> next_x_vals;
           vector<double> next_y_vals;
 
           /**
@@ -98,6 +110,106 @@ int main() {
            *   sequentially every .02 seconds
            */
 
+	  std::cout<<"s = "<<car_s<<"\n";
+	  std::cout<<"x = "<<car_x<<"\n";
+	  std::cout<<"yaw = "<<car_yaw<<"\n";
+          std::cout<<"No. of points from previous path: "<<prev_path_size<<"\n";
+	  if (prev_path_size < 2) {
+	      double prev_car_x = car_x - ref_speed*0.02*cos(deg2rad(car_yaw));
+	      double prev_car_y = car_y - ref_speed*0.02*sin(deg2rad(car_yaw));
+
+	      anchor_pts_x.push_back(prev_car_x);
+	      anchor_pts_x.push_back(car_x);
+              anchor_pts_y.push_back(prev_car_y);
+	      anchor_pts_y.push_back(car_y);
+	  }
+
+	  else {
+	     
+              double prev2_car_x = previous_path_x[prev_path_size-2];
+	      double prev_car_x = previous_path_x[prev_path_size-1];
+              double prev2_car_y = previous_path_y[prev_path_size-2];
+	      double prev_car_y = previous_path_y[prev_path_size-1];
+
+	      //update the current reference to the last point from the previous set of points
+	      current_ref_x = prev_car_x;
+	      current_ref_y = prev_car_y;
+              current_ref_yaw_rad = atan2((prev_car_y - prev2_car_y),(prev_car_x - prev2_car_x));
+
+	      anchor_pts_x.push_back(prev2_car_x);
+	      anchor_pts_x.push_back(prev_car_x);
+              anchor_pts_y.push_back(prev2_car_y);
+	      anchor_pts_y.push_back(prev_car_y);
+	  }
+          
+	  //add points from the previous path to the next_vals 
+	  for(int i=0;i<prev_path_size;i++) {
+              next_x_vals.push_back(previous_path_x[i]);
+	      next_y_vals.push_back(previous_path_y[i]); 
+	  }
+
+	  //add remaining points from the future path using an interpolated spline
+	  //create 3 additional anchor points for the spline by calculating far spaced future positions
+	  vector<double> next_anchor_pt_1 = getXY(car_s + 25.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+	  vector<double> next_anchor_pt_2 = getXY(car_s + 50.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+	  vector<double> next_anchor_pt_3 = getXY(car_s + 75.0,(lane_no*4)+2, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+	  anchor_pts_x.push_back(next_anchor_pt_1[0]);
+	  anchor_pts_x.push_back(next_anchor_pt_2[0]);
+	  anchor_pts_x.push_back(next_anchor_pt_3[0]);
+	  anchor_pts_y.push_back(next_anchor_pt_1[1]);
+	  anchor_pts_y.push_back(next_anchor_pt_2[1]);
+	  anchor_pts_y.push_back(next_anchor_pt_3[1]);
+          
+	  for(int i=0; i<anchor_pts_x.size(); i++) {
+	      std::cout<<"Anchor points in mapcoords: \n";
+	      std::cout<<anchor_pts_x[i]<<" ";
+	      std::cout<<anchor_pts_y[i]<<"\n";
+          }
+          //convert above anchor points to ego vehicle coordinates to enable easier spline/polynomial fitting
+	  for(int i=0; i<anchor_pts_x.size(); i++) {
+              double x_shifted2veh = anchor_pts_x[i] - current_ref_x;
+	      double y_shifted2veh = anchor_pts_y[i] - current_ref_y;
+	      
+	      anchor_pts_x[i] = x_shifted2veh*cos(0.0-current_ref_yaw_rad) - y_shifted2veh*sin(0.0-current_ref_yaw_rad);  
+	      anchor_pts_y[i] = x_shifted2veh*sin(0.0-current_ref_yaw_rad) + y_shifted2veh*cos(0.0-current_ref_yaw_rad);  
+	  }
+
+	   for(int i=0; i<anchor_pts_x.size(); i++) {
+	      std::cout<<"Anchor points in vehiclecoords: \n";
+	      std::cout<<anchor_pts_x[i]<<" ";
+	      std::cout<<anchor_pts_y[i]<<"\n";
+          }
+
+          // the following spline data is in vehicle coordinates
+	  tk::spline spline_trajectory;
+	  spline_trajectory.set_points(anchor_pts_x, anchor_pts_y);
+	  double trajectory_x_end = 25.0;
+	  double trajectory_y_end = spline_trajectory(trajectory_x_end);
+	  double trajectory_dist = sqrt((trajectory_x_end*trajectory_x_end)+(trajectory_y_end*trajectory_y_end));
+
+	  double no_of_splits = trajectory_dist/(ref_speed*0.02);
+	  double delta_x_trajectory = trajectory_x_end/no_of_splits;
+	  double current_x_veh = 0.0;
+
+	  for(int i=0; i<(50-prev_path_size); i++) {
+	      double point_x_veh = current_x_veh + delta_x_trajectory;
+	      double point_y_veh = spline_trajectory(point_x_veh);
+
+	      //convert the points in the vehicle coordinates back to map coordinates
+              double point_x_map = (point_x_veh*cos(current_ref_yaw_rad) - point_y_veh*sin(current_ref_yaw_rad)) + current_ref_x;
+	      double point_y_map = (point_x_veh*sin(current_ref_yaw_rad) + point_y_veh*cos(current_ref_yaw_rad)) + current_ref_y;
+
+	      next_x_vals.push_back(point_x_map);
+              next_y_vals.push_back(point_y_map);	      
+	      
+	      current_x_veh = point_x_veh;
+	  }
+	   
+	  for(int i=0; i<next_x_vals.size(); i++) {
+	      std::cout<<next_x_vals[i]<<" ";
+          }
+	  std::cout<<"\n";
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
