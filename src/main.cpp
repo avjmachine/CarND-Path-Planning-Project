@@ -97,6 +97,16 @@ int main() {
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
            */
+	  double delta_s = 0.447;
+	  for(int i=0;i<50;i++) {
+	      double next_s = car_s + delta_s*(i+1);
+	      double next_d = 6;
+              vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x,
+                     map_waypoints_y);
+	      std::cout<<xy[0]<<" "<<xy[1];
+              next_x_vals.push_back(xy[0]);
+	      next_y_vals.push_back(xy[1]); 
+	  }
 
 
           msgJson["next_x"] = next_x_vals;
