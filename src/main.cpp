@@ -51,7 +51,11 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
+  const double REF_SPEED = 49.0*0.44704; //kept 1mph below 50mph for safety and is converted to m/s
+  double current_speed = 0.0; //initial speed of the car
+  int lane_no = 1; //initially in the centre lane
+
+  h.onMessage([&REF_SPEED, &current_speed, &lane_no, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
@@ -91,8 +95,6 @@ int main() {
 
           json msgJson;
 
-	  double ref_speed = 49.0*0.44704;  //kept 1mph below 50mph for safety and is converted to m/s
-	  int lane_no = 1; //initially in the centre lane
 	  int prev_path_size = previous_path_x.size();
           
 	  double current_ref_x = car_x;
@@ -104,6 +106,8 @@ int main() {
           
 	  vector<double> next_x_vals;
           vector<double> next_y_vals;
+
+	  bool apply_brakes = false; //in initial default case, brakes are not applied
 
 	  std::cout<<"s = "<<car_s<<"\n";
 	  std::cout<<"previous s = "<<end_path_s<<"\n";
@@ -117,8 +121,8 @@ int main() {
 	  }
 
 	  if (prev_path_size < 2) {
-	      double prev_car_x = car_x - ref_speed*0.02*cos(deg2rad(car_yaw));
-	      double prev_car_y = car_y - ref_speed*0.02*sin(deg2rad(car_yaw));
+	      double prev_car_x = car_x - REF_SPEED*0.02*cos(deg2rad(car_yaw));
+	      double prev_car_y = car_y - REF_SPEED*0.02*sin(deg2rad(car_yaw));
 
 	      anchor_pts_x.push_back(prev_car_x);
 	      anchor_pts_x.push_back(car_x);
@@ -163,11 +167,11 @@ int main() {
 	  anchor_pts_y.push_back(next_anchor_pt_2[1]);
 	  anchor_pts_y.push_back(next_anchor_pt_3[1]);
           
-	  for(int i=0; i<anchor_pts_x.size(); i++) {
-	      std::cout<<"Anchor points in mapcoords: \n";
-	      std::cout<<anchor_pts_x[i]<<" ";
-	      std::cout<<anchor_pts_y[i]<<"\n";
-          }
+	  //for(int i=0; i<anchor_pts_x.size(); i++) {
+	  //    std::cout<<"Anchor points in mapcoords: \n";
+	  //    std::cout<<anchor_pts_x[i]<<" ";
+	  //    std::cout<<anchor_pts_y[i]<<"\n";
+          //}
           //convert above anchor points to ego vehicle coordinates to enable easier spline/polynomial fitting
 	  for(int i=0; i<anchor_pts_x.size(); i++) {
               double x_shifted2veh = anchor_pts_x[i] - current_ref_x;
@@ -177,16 +181,17 @@ int main() {
 	      anchor_pts_y[i] = x_shifted2veh*sin(0.0-current_ref_yaw_rad) + y_shifted2veh*cos(0.0-current_ref_yaw_rad);  
 	  }
 
-	   for(int i=0; i<anchor_pts_x.size(); i++) {
-	      std::cout<<"Anchor points in vehiclecoords: \n";
-	      std::cout<<anchor_pts_x[i]<<" ";
-	      std::cout<<anchor_pts_y[i]<<"\n";
-          }
+	  // for(int i=0; i<anchor_pts_x.size(); i++) {
+	  //    std::cout<<"Anchor points in vehiclecoords: \n";
+	  //    std::cout<<anchor_pts_x[i]<<" ";
+	  //    std::cout<<anchor_pts_y[i]<<"\n";
+          //}
 
 	  // check for sensor fusion data to avoid collisions with other vehicles
 	  for(int i=0; i<sensor_fusion.size(); i++) {
 	      double other_veh_d = sensor_fusion[i][6];
               if((other_veh_d > lane_no*4) && (other_veh_d < (lane_no+1)*4)) {
+		  std::cout<<"Vehicle in lane detected with id: "<<sensor_fusion[i][0]<<"\n";
 	          double other_veh_s = sensor_fusion[i][5];
 		  double other_veh_vx = sensor_fusion[i][3];
 		  double other_veh_vy = sensor_fusion[i][4];
@@ -194,13 +199,25 @@ int main() {
 
 		  double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
 		  if (fut_other_veh_s > current_ref_s) {
-		      if (fut_other_veh_s - current_ref_s < 25) {
-		          ref_speed = 0.9*other_veh_res_vel;
+		      std::cout<<"Vehicle in front detected with id: "<<sensor_fusion[i][0]<<"\n";	  
+		      if (fut_other_veh_s - current_ref_s < 50) {
+			  std::cout<<"Vehicle within 50m detected in front with id: "<<sensor_fusion[i][0]<<"\n";    
+		          apply_brakes = true;
 		      }
 		  }	  
 	      }	      
 	  } 
 
+	  if (apply_brakes) {
+	      current_speed -= 0.1;
+	      std::cout<<"Current speed set to: "<<current_speed<<"\n";
+	  }
+	  else if (current_speed < REF_SPEED) { 
+	      current_speed += 0.1;
+	      std::cout<<"Current speed set to: "<<current_speed<<"\n";
+	  }
+	  
+	  // get new path points from a spline
           // the following spline data is in vehicle coordinates
 	  tk::spline spline_trajectory;
 	  spline_trajectory.set_points(anchor_pts_x, anchor_pts_y);
@@ -208,7 +225,7 @@ int main() {
 	  double trajectory_y_end = spline_trajectory(trajectory_x_end);
 	  double trajectory_dist = sqrt((trajectory_x_end*trajectory_x_end)+(trajectory_y_end*trajectory_y_end));
 
-	  double no_of_splits = trajectory_dist/(ref_speed*0.02);
+	  double no_of_splits = trajectory_dist/(current_speed*0.02);
 	  double delta_x_trajectory = trajectory_x_end/no_of_splits;
 	  double current_x_veh = 0.0;
 
@@ -226,10 +243,10 @@ int main() {
 	      current_x_veh = point_x_veh;
 	  }
 	   
-	  for(int i=0; i<next_x_vals.size(); i++) {
-	      std::cout<<next_x_vals[i]<<" ";
-          }
-	  std::cout<<"\n";
+	  //for(int i=0; i<next_x_vals.size(); i++) {
+	  //    std::cout<<next_x_vals[i]<<" ";
+          //}
+	  //std::cout<<"\n";
 
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
