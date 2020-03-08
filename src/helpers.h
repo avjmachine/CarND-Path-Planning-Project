@@ -157,18 +157,18 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s,
 // Check if there is a risk of collision with the vehicle in front
 bool frontal_collision_risk(vector<double> other_vehicle, double current_ref_s, double current_speed, int lane_no, int prev_path_size) {
   double other_veh_d = other_vehicle[6];
+  // check if the other vehicle's d indicates that it is in the same lane_no as the ego vehicle 
   if((other_veh_d > lane_no*4) && (other_veh_d < (lane_no+1)*4)) {
-      //std::cout<<"Vehicle in lane detected with id: "<<other_vehicle[0]<<"\n";
       double other_veh_s = other_vehicle[5];
       double other_veh_vx = other_vehicle[3];
       double other_veh_vy = other_vehicle[4];
       double other_veh_res_vel = sqrt(other_veh_vx*other_veh_vx + other_veh_vy*other_veh_vy);
 
       double fut_other_veh_s = (other_veh_res_vel*0.02*prev_path_size) + other_veh_s;
+      // check if the other vehicle is ahead of the ego vehicle
       if (fut_other_veh_s > current_ref_s) {
-          //std::cout<<"Vehicle in front detected with id: "<<other_vehicle[0]<<"\n";
+	  // check if the other vehicle is within 25m distance
           if ((fut_other_veh_s - current_ref_s < 25)) { 
-              std::cout<<"Vehicle within 25m detected in front with id: "<<other_vehicle[0]<<"\n";
 	      return true;
           }
       }
@@ -183,9 +183,9 @@ int lane_status(vector<vector<double>> sensor_fusion, double current_ref_s, doub
   bool is_lane_slow = false;
   for(int i=0; i<sensor_fusion.size(); i++) {
       double other_veh_d = sensor_fusion[i][6];
+      // check if the other vehicle's d indicates that it is in the same lane_no as the destination lane
       if((other_veh_d > to_lane*4) && (other_veh_d < (to_lane+1)*4)) {
 	  int other_vehicle_id = sensor_fusion[i][0];
-          std::cout<<"Vehicle in to lane "<<to_lane<<" detected with id: "<<sensor_fusion[i][0]<<"\n";
           double other_veh_s = sensor_fusion[i][5];
           double other_veh_vx = sensor_fusion[i][3];
           double other_veh_vy = sensor_fusion[i][4];
@@ -195,34 +195,38 @@ int lane_status(vector<vector<double>> sensor_fusion, double current_ref_s, doub
 	  double delta_s_wrt_ego = fut_other_veh_s - current_ref_s;  
 	  double delta_v_wrt_ego = other_veh_res_vel - current_speed;
           // check if there is a vehicle within +/- 10m which makes the lane unsafe to enter
+	  // 0 can be returned immediately, since the lane is unsafe even if one vehicle blocks it
 	  if (fabs(delta_s_wrt_ego) <= 10.0) {
-              std::cout<<"Vehicle #"<<other_vehicle_id<<" within +/-10m, lane unsafe to enter!"<<"\n";
 	      return 0;
 	  }
 	  // if there is a vehicle ahead by min. 10m and max. 30m, and is slower than our vehicle
 	  // it makes the lane unsafe to enter
+	  // 0 can be returned immediately, since the lane is unsafe even if one vehicle blocks it
           else if ((delta_s_wrt_ego > 10.0) && (delta_s_wrt_ego <= 30.0) && (delta_v_wrt_ego < 0.0)) {
-              std::cout<<"Slower vehicle #"<<other_vehicle_id<<" within 25m in front, lane unsafe to enter!"<<"\n";
 	      return 0;
 	  }
 	  // if there is a vehicle behind by min. 10m and max. 30m, and is faster than our vehicle
           // it makes the lane unsafe to enter
+	  // 0 can be returned immediately, since the lane is unsafe even if one vehicle blocks it
           else if ((delta_s_wrt_ego < -10.0) && (delta_s_wrt_ego >= -30.0) && (delta_v_wrt_ego > 0.0)) {
-              std::cout<<"Faster vehicle #"<<other_vehicle_id<<" within 25m in rear, lane unsafe to enter!"<<"\n";
               return 0;
           }
+	  // check if the other vehicle is within a 30m to 60m distance, but slower than the ego vehicle
+	  // this indicates that the destination lane is slow, but safe to enter
+	  // no values to be returned here, since all vehicles need to be checked before it is confirmed as safe
 	  else if ((delta_s_wrt_ego > 30.0) && (delta_s_wrt_ego <= 60.0) && (delta_v_wrt_ego < 0.0)) {
-	      std::cout<<"Slower vehicle # "<<other_vehicle_id<<" between 30m to 60m in front, lane too slow to enter!"<<"\n";
  	      is_lane_slow = true;    
 	  }
       }
   }
+  // if none of the vehicles affects the safety, but even if one slows down the lane
+  // the lane is declared safe, but slow, meaning it can be used as a temporary lane to transition to another lane
   if (is_lane_slow) {
-  std::cout<<"Lane #"<<to_lane<<" safe, but too slow!\n";
   return 1;
   }
+  // if none of the vehicle within the vicinity of 60m blocks the lane or is slower than the ego vehicle
+  // the lane is both safe and fast, and is clear to enter
   else {
-  std::cout<<"Lane #"<<to_lane<<" safe and fast, good to enter\n";
   return 2;
   }
 }
