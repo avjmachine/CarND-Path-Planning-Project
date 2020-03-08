@@ -109,6 +109,7 @@ int main() {
 
 	  bool apply_brakes = false; //in initial default case, brakes are not applied
           bool change_lane = false; //in initial case
+	  bool lane_change_over = true;
           int to_lane;
 
 	  std::cout<<"s = "<<car_s<<"\n";
@@ -118,9 +119,11 @@ int main() {
 	  std::cout<<"lane_no= "<<lane_no<<"\n";
           std::cout<<"No. of points from previous path: "<<prev_path_size<<"\n";
 	
-	  double current_ref_s = car_s; 
+	  double current_ref_s = car_s;
+	  double current_ref_d = car_d; 
 	  if (prev_path_size > 0) {
-              current_ref_s = end_path_s; 
+              current_ref_s = end_path_s;
+	      current_ref_d = end_path_d; 
 	  }
 
 	  if (prev_path_size < 2) {
@@ -189,38 +192,128 @@ int main() {
 	  //    std::cout<<anchor_pts_x[i]<<" ";
 	  //    std::cout<<anchor_pts_y[i]<<"\n";
           //}
+          
+	  if (fabs((4*lane_no)+2 - current_ref_d) >= 1) {
+	  lane_change_over = false;
+	  std::cout<<"Lane change still in progress!\n";
+	  }
 
 	  // check for sensor fusion data to avoid collisions with other vehicles
 	  for(int i=0; i<sensor_fusion.size(); i++) {
-	      if (frontal_collision_risk(sensor_fusion[i], current_ref_s, lane_no, prev_path_size)) { 
-	          change_lane = true;
+	      if (frontal_collision_risk(sensor_fusion[i], current_ref_s, current_speed, lane_no, prev_path_size)) { 
+	          apply_brakes = true;
+                  //change lanes only at speeds lower than 40mph to avoid excessive accelerations due to cornering
+		  //change lanes only at speeds higher than 25mph to make quicker turns and avoid confusions
+		  //change lanes only when previous lane change is complete
+		  if((current_speed < 45.0*0.44704) && (current_speed > 25.0*0.44704) && (lane_change_over)) {  
+	              std::cout<<"*************!!!!!!!Planning for lane change!!!!!!!!!!!*************\n";
+	              change_lane = true;
+		      apply_brakes = false; //to avoid combined cornering and braking
+		  }
 		  break;
 	      }
           }		  
-
+          
+	  // if lane is required to be changed then for each choice of destination lane, investigate feasibility
 	  if (change_lane) {
-	      if (lane_no==1 || lane_no==2) {
-	            to_lane = lane_no - 1;
-	       }
+	      //if starting position is lane 1
+	      if (lane_no == 1) {
+                  //the ego vehicle will first try left lane 0
+		  to_lane = 0;
+	          int lane_0_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		  if (lane_0_status == 2) {
+		      lane_no = to_lane;
+		      std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		  }
+		  // if lane 0 is not safe or too slow to enter, try right lane 2
+		  else {
+		      to_lane = 2;
+		      int lane_2_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		      if (lane_2_status == 2) {
+		          lane_no = to_lane;
+		          std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		      }
+		      // if lane 2 is also not safe or too slow to enter, abort lane change for now and apply brakes
+		      else {
+		          change_lane = false;
+		          apply_brakes = true;
+		      }	    
+		 }
+	      }
+	      //if starting position is lane 0
 	      else if (lane_no==0) {
-	            to_lane = lane_no + 1;
-	       }
-	      if (is_lane_free(sensor_fusion, current_ref_s, to_lane, prev_path_size)) {
-                    lane_no = to_lane;
-		    std::cout<<"Lane changed to :"<<lane_no<<"\n";
-	       }
-	      else {
-                    change_lane = false;
-	            apply_brakes = true;
-               }
-	  } 
+                  //the ego vehicle will first try left lane 1
+		  to_lane = 1;
+	          int lane_1_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		  if (lane_1_status == 2) {
+		      lane_no = to_lane;
+		      std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		  }
+		  // if lane 1 can't be entered into since it is too slow to enter, check if it is safe to enter 
+		  else if (lane_1_status == 1){
+		      // if lane 1 is safe to enter, check if lane 2 can be entered using lane 1 temporarily 
+		      to_lane = 2;
+		      int lane_2_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		      if (lane_2_status == 2) {
+		          lane_no = to_lane - 1;  //to avoid direct jump 
+		          std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		      }
+		      // if lane 2 is also not safe or too slow to enter, abort lane change for now and apply brakes
+		      else {
+			  change_lane = false;
+			  apply_brakes = true;
+		      }
+		  }
+		  // if lane 1 is unsafe to enter, abort lane change for now and apply brakes 
+		  else if (lane_1_status == 0){
+		          change_lane = false;
+		          apply_brakes = true;
+		  }	    
+	      }
+	      //if starting position is lane 2
+	      else if (lane_no == 2) {
+                  //the ego vehicle will first try left lane 1
+		  to_lane = 1;
+	          int lane_1_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		  if (lane_1_status == 2) {
+		      lane_no = to_lane;
+		      std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		  }
+		  // if lane 1 can't be entered into since it is too slow to enter, check if it is safe to enter 
+		  else if (lane_1_status == 1){
+		      // if lane 1 is safe to enter, check if lane 0 can be entered using lane 1 temporarily 
+		      to_lane = 0;
+		      int lane_0_status = lane_status(sensor_fusion, current_ref_s, current_speed, to_lane, prev_path_size);
+		      if (lane_0_status == 2) {
+		          lane_no = to_lane + 1; //to avoid direct jump required
+		          std::cout<<"Lane being changed to :"<<lane_no<<"\n";
+		      }
+		      // if lane 0 is also not safe or too slow to enter, abort lane change for now and apply brakes
+		      else {
+			  change_lane = false;
+			  apply_brakes = true;
+		      }
+		  }
+		  // if lane 1 is unsafe to enter, abort lane change for now and apply brakes 
+		  else if (lane_1_status == 0){
+		          change_lane = false;
+		          apply_brakes = true;
+		  }	    
+	      }   
+	
+  	  }
 
-	  if (apply_brakes) {
-	      current_speed -= 0.2;
+	      
+
+	  if ((apply_brakes) && (lane_change_over)) {
+	      current_speed -= 0.4;
 	      std::cout<<"Braking! Current speed set to: "<<current_speed<<"\n";
 	  }
-	  else if (current_speed < REF_SPEED) { 
-	      current_speed += 0.2;
+
+	  // increase speed if current speed is lower than the set speed limit and only if no lane change is planned
+	  // this is because increasing speed during lane_change will increase total acceleration
+	  else if ((current_speed < REF_SPEED) && (lane_change_over)) { 
+	      current_speed += 0.4;
 	      std::cout<<"Speeding Up! Current speed set to: "<<current_speed<<"\n";
 	  }
 	  
@@ -235,14 +328,19 @@ int main() {
 	  double no_of_splits = trajectory_dist/(current_speed*0.02);
 	  double delta_x_trajectory = trajectory_x_end/no_of_splits;
 	  double current_x_veh = 0.0;
+	  double point_x_veh = 0.0;
+	  double point_y_veh = 0.0;
+	  double point_x_map = 0.0;
+	  double point_y_map = 0.0;
 
 	  for(int i=0; i<(50-prev_path_size); i++) {
-	      double point_x_veh = current_x_veh + delta_x_trajectory;
-	      double point_y_veh = spline_trajectory(point_x_veh);
+	      point_x_veh = current_x_veh + delta_x_trajectory;
+	      //std::cout<<delta_x_trajectory<<"-"<<spline_trajectory(point_x_veh)-point_y_veh<<" ";
+	      point_y_veh = spline_trajectory(point_x_veh);
 
 	      //convert the points in the vehicle coordinates back to map coordinates
-              double point_x_map = (point_x_veh*cos(current_ref_yaw_rad) - point_y_veh*sin(current_ref_yaw_rad)) + current_ref_x;
-	      double point_y_map = (point_x_veh*sin(current_ref_yaw_rad) + point_y_veh*cos(current_ref_yaw_rad)) + current_ref_y;
+              point_x_map = (point_x_veh*cos(current_ref_yaw_rad) - point_y_veh*sin(current_ref_yaw_rad)) + current_ref_x;
+	      point_y_map = (point_x_veh*sin(current_ref_yaw_rad) + point_y_veh*cos(current_ref_yaw_rad)) + current_ref_y;
 
 	      next_x_vals.push_back(point_x_map);
               next_y_vals.push_back(point_y_map);	      
