@@ -10,7 +10,7 @@ Self-Driving Car Engineer Nanodegree Program
 
 ## Introduction
 
-The goal of this project is to safely navigate around a virtual highway with other traffic. There is a 50 MPH speed limit which must be followed. The car's localization and sensor fusion data will be provided as inputs from the simulator, and there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, by passing slower traffic when possible. The car should avoid hitting other cars at all cost. It should also drive inside of the marked road lanes at all times, except during the brief moments while switching lanes. 
+The goal of this project is to safely navigate around a virtual highway with other traffic, using a C++ program for path planning. There is a 50 MPH speed limit which must be followed. The car's localization and sensor fusion data will be provided as inputs from the simulator to the C++ program. It is also provided a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, by passing slower traffic when possible. The car should avoid hitting other cars at all cost. It should also drive inside of the marked road lanes at all times, except during the brief moments while switching lanes. 
 
 The car should be able to make one complete loop around the 6946m highway and stick close to the 50MPH speed, and must slow down only when there obstructing traffic and lane change is not feasible. Also, the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
 
